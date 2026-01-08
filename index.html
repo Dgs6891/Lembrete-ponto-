@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ponto Alerta Pro</title>
+    <meta name="theme-color" content="#2563eb">
+    <link rel="manifest" href="data:application/manifest+json,{%22name%22:%22Ponto%20Alerta%22,%22short_name%22:%22Ponto%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22#ffffff%22}">
+    
+    <style>
+        :root { --primary: #2563eb; --success: #22c55e; --danger: #ef4444; --bg: #f1f5f9; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; }
+        .card { background: white; padding: 1.5rem; border-radius: 16px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); width: 100%; max-width: 350px; }
+        h2 { color: #1e293b; margin: 0 0 1.5rem 0; text-align: center; font-size: 1.2rem; }
+        .input-group { margin-bottom: 1.2rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; font-size: 0.9rem; }
+        input[type="time"] { width: 100%; padding: 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 1rem; margin-bottom: 10px; }
+        
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 8px; }
+        .btn-add { background: var(--primary); color: white; }
+        .btn-test { background: white; color: var(--primary); border: 2px solid var(--primary); }
+        .btn:active { transform: scale(0.98); }
+
+        ul { list-style: none; padding: 0; margin-top: 1.5rem; border-top: 1px solid #e2e8f0; padding-top: 1rem; }
+        li { background: #f8fafc; padding: 12px; margin-bottom: 8px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--primary); }
+        .delete-btn { background: var(--danger); color: white; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+        .status { font-size: 0.75rem; text-align: center; color: #64748b; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>⏰ Lembrete de Ponto</h2>
+    
+    <div class="input-group">
+        <label>Definir horário:</label>
+        <input type="time" id="horaPonto">
+        <button class="btn btn-add" onclick="adicionarHorario()">Agendar Horário</button>
+        <button class="btn btn-test" onclick="testarNotificacao()">🔔 Testar Notificação</button>
+    </div>
+
+    <ul id="listaHorarios"></ul>
+    <div class="status" id="statusCheck">Verificando horários...</div>
+</div>
+
+<audio id="somAlerta" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
+
+<script>
+    let horarios = JSON.parse(localStorage.getItem('horarios')) || [];
+    const audio = document.getElementById('somAlerta');
+
+    // Registrar Service Worker simples
+    if ('serviceWorker' in navigator) {
+        const sw = `self.addEventListener('fetch', () => {});`;
+        const blob = new Blob([sw], {type: 'text/javascript'});
+        navigator.serviceWorker.register(URL.createObjectURL(blob));
+    }
+
+    function atualizarLista() {
+        const lista = document.getElementById('listaHorarios');
+        lista.innerHTML = '';
+        horarios.sort().forEach((h, index) => {
+            lista.innerHTML += `<li><strong>${h}</strong> <button class="delete-btn" onclick="remover(${index})">Remover</button></li>`;
+        });
+        localStorage.setItem('horarios', JSON.stringify(horarios));
+    }
+
+    async function adicionarHorario() {
+        const hora = document.getElementById('horaPonto').value;
+        if (!hora) return alert("Selecione um horário!");
+
+        const permissao = await Notification.requestPermission();
+        if (permissao === 'granted') {
+            if (!horarios.includes(hora)) {
+                horarios.push(hora);
+                atualizarLista();
+            }
+        } else {
+            alert("Ative as notificações para o app funcionar!");
+        }
+    }
+
+    function remover(index) {
+        horarios.splice(index, 1);
+        atualizarLista();
+    }
+
+    function dispararAlerta(titulo, msg) {
+        // Tenta tocar o som
+        audio.play().catch(e => console.log("Áudio bloqueado pelo navegador. Interaja com a página primeiro."));
+        
+        // Mostra notificação visual
+        if (Notification.permission === "granted") {
+            new Notification(titulo, {
+                body: msg,
+                icon: "https://cdn-icons-png.flaticon.com/512/2693/2693507.png",
+                vibrate: [200, 100, 200]
+            });
+        }
+    }
+
+    function testarNotificacao() {
+        Notification.requestPermission().then(perm => {
+            if(perm === 'granted') {
+                dispararAlerta("Teste de Ponto", "Seu sistema de alertas está funcionando!");
+            } else {
+                alert("Permissão de notificação negada.");
+            }
+        });
+    }
+
+    // Checagem de minuto em minuto
+    setInterval(() => {
+        const agora = new Date();
+        const horaAtual = agora.getHours().toString().padStart(2, '0') + ':' + 
+                         agora.getMinutes().toString().padStart(2, '0');
+        
+        document.getElementById('statusCheck').innerText = `Última verificação: ${horaAtual}`;
+
+        if (horarios.includes(horaAtual)) {
+            // Evita disparar múltiplos alertas no mesmo minuto
+            if (window.ultimoAlerta !== horaAtual) {
+                dispararAlerta("HORA DO PONTO!", "Não esqueça de bater o seu ponto agora!");
+                window.ultimoAlerta = horaAtual;
+            }
+        }
+    }, 10000); // Checa a cada 10 segundos para precisão
+
+    atualizarLista();
+</script>
+
+</body>
+</html>
